@@ -1,0 +1,124 @@
+# =========================
+# 基金预测/回测系统配置文件
+# =========================
+# 说明：
+# - 所有路径默认相对当前运行目录（通常是 fund_predictor/ 目录）。
+# - 可通过命令行参数 --config 指定其他配置文件。
+
+data_source:
+  # 天天基金历史净值接口地址（F10DataApi）
+  base_url: "https://fund.eastmoney.com/f10/F10DataApi.aspx"
+  # 单页请求条数（接口不保证稳定返回该条数，程序会按实际记录数处理）
+  per_page: 200
+  # 网络请求超时时间（秒）
+  timeout_seconds: 10
+  # 失败重试次数（总请求次数 = 1 + retry_times）
+  retry_times: 2
+  # 每次重试前等待时间（秒）
+  retry_sleep_seconds: 1.5
+  # 是否启用增量更新：true=只拉取本地最新日期之后的数据；false=每次全量
+  use_incremental_update: true
+
+storage:
+  # 基金净值缓存目录（每个基金一个 parquet/csv 文件）
+  nav_dir: "data/nav"
+  # 元数据目录（抓取状态、调参历史、交易账本等）
+  meta_dir: "data/meta"
+  # 报告输出目录（md/html/json/csv）
+  output_dir: "output/reports"
+  # 净值存储格式：parquet 或 csv
+  file_format: "parquet"
+
+feature:
+  # R1短跌窗口列表（单位：交易日）；会分别计算 R1_3 / R1_5 / R1_15
+  r1_windows: [3, 5, 15]
+  # R2回撤滚动窗口（单位：交易日），常用约220（约一年）
+  r2_window: 220
+  # 历史波动率HV窗口（单位：交易日）
+  hv_window: 90
+  # 分位数窗口：null 表示扩展窗口（expanding）；若填整数则可扩展为固定滚动窗口
+  quantile_window: null
+  # 动态阈值分位水平（例如0.8代表80分位）
+  quantile_level: 0.8
+  # R1静态最小阈值下限，避免阈值过低导致噪声信号
+  min_r1_floor: 0.03
+  # R2静态最小阈值下限
+  min_r2_floor: 0.08
+  # 下跌加速度最小阈值，低于此值视为下跌动量不足
+  accel_min: 0.5
+
+strategy:
+  # 买入延迟M扫描范围 [最小值, 最大值]（单位：交易日）
+  buy_delay_range: [0, 35]
+  # 持有天数N最小值（单位：交易日）
+  hold_days_min: 7
+  # 持有天数N最大值（单位：交易日）
+  hold_days_max: 540
+  # 持有天数N扫描步长（单位：交易日）
+  hold_days_step: 3
+  # 胜率目标阈值：单笔收益大于该值记为胜利（例如0.12=12%）
+  win_target: 0.12
+  # 动态止盈倍数：止盈阈值 = take_profit_hv_multiplier * 买入日HV
+  take_profit_hv_multiplier: 3.5
+  # 止盈确认天数：连续满足止盈阈值多少个交易日才触发卖出
+  take_profit_confirm_days: 10
+  # 有效参数组合最少成交笔数（低于该值视为样本不足）
+  min_trades: 8
+  # 单边交易成本费率（买入和卖出都会计入，0.001=千一）
+  transaction_cost_rate: 0.0005
+  # 单边滑点费率（用于近似成交偏差）
+  slippage_rate: 0.0005
+
+threshold_scan:
+  # R1静态阈值候选列表（会逐个扫描）
+  r1_candidates: [0.03, 0.05, 0.08]
+  # R2分位候选列表（对历史R2取这些分位作为阈值）
+  r2_quantile_candidates: [0.6, 0.7, 0.8, 0.9]
+
+scoring:
+  # 参数惩罚：当 M >= 15 时扣分值
+  penalty_m_ge_15: 0.001
+  # 参数惩罚：当 N <= 7 时扣分值
+  penalty_n_le_7: 0.015
+  # 最近验证窗口权重（用于策略打分中的近期表现项）
+  recent_validation_weight: 0.25
+  # 置信度下限（最终会 clamp 到 [min_confidence, max_confidence]）
+  min_confidence: 0.0
+  # 置信度上限
+  max_confidence: 1.0
+
+runtime:
+  # 单次运行最多处理基金数量（防止任务过大超时）
+  max_funds_per_run: 50
+  # 单基金最大网格组合数上限（超过后会自动切换到精简网格）
+  max_grid_combinations_per_fund: 2500
+  # 是否启用多进程（当前实现默认关闭）
+  enable_multiprocessing: false
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  log_level: "INFO"
+  # 基金池JSON文件路径：未传 --funds/--fund-file 时自动从该文件读取基金代码
+  funds_json: "data/meta/funds.json"
+
+quality:
+  # 数据缺失率上限（超过则跳过该基金的策略分析）
+  max_missing_ratio: 0.08
+  # 单日收益绝对值异常阈值（例如0.25=25%），用于识别净值异常跳变
+  abnormal_return_threshold: 0.25
+  # 异常跳变占比上限（超过则跳过该基金）
+  max_abnormal_ratio: 0.02
+
+enhancement:
+  # 是否启用趋势过滤（使用短均线与长均线判断市场状态）
+  enable_regime_filter: true
+  # 趋势过滤短均线窗口
+  regime_short_window: 20
+  # 趋势过滤长均线窗口
+  regime_long_window: 60
+  # 是否启用信号强度分层
+  enable_intensity_layer: true
+  # 强信号阈值（>= strong_threshold 视为强信号）
+  strong_threshold: 1.6
+  # 是否启用近期窗口加权
+  enable_recent_weight: true
+  # 近期窗口比例（用于计算 recent_validation_score）
+  recent_window_ratio: 0.2
