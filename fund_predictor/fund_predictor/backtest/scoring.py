@@ -19,6 +19,8 @@ def summarize_performance(trades, win_target: float):
         "take_profit_rate": take_profit_rate,
         "maturity_rate": (trades["exit_reason"] == "maturity").mean(),
         "avg_hold_days": (trades["sell_date"] - trades["buy_date"]).dt.days.mean(),
+        # 强信号占比：用于辅助判断策略是否过度依赖弱信号。
+        "strong_signal_rate": (trades.get("intensity_level", "none") == "strong").mean() if "intensity_level" in trades else 0.0,
     }
 
 
@@ -32,6 +34,7 @@ def score_strategy(metrics: dict, m: int, n: int, cfg: dict, recent_validation_s
         + metrics["avg_return"] * 0.25
         + metrics["take_profit_rate"] * 0.05
         + recent_validation_score * 0.05
+        + metrics.get("strong_signal_rate", 0.0) * 0.03
     )
     penalty = 0.0
     if m >= 15:

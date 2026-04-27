@@ -9,6 +9,13 @@ def simulate_trades(df: pd.DataFrame, m: int, n: int, cfg: dict) -> pd.DataFrame
     signal_idx = df.index[df["signal"]].tolist()
 
     rows = []
+    # 交易成本与滑点采用“单边费率”建模：
+    # 买入价上调（更贵），卖出价下调（更低），使回测更贴近真实执行。
+    cost_rate = float(cfg["strategy"].get("transaction_cost_rate", 0.0))
+    slippage_rate = float(cfg["strategy"].get("slippage_rate", 0.0))
+    buy_adjust = 1 + cost_rate + slippage_rate
+    sell_adjust = 1 - cost_rate - slippage_rate
+
     for idx in signal_idx:
         buy_idx = idx + m
         if buy_idx >= len(df):
@@ -31,19 +38,25 @@ def simulate_trades(df: pd.DataFrame, m: int, n: int, cfg: dict) -> pd.DataFrame
                 reason = "take_profit"
                 break
 
+        raw_buy_price = price.iloc[buy_idx]
+        raw_sell_price = price.iloc[sell_idx]
+        exec_buy_price = raw_buy_price * buy_adjust
+        exec_sell_price = raw_sell_price * sell_adjust
+
         rows.append(
             {
                 "signal_date": dates.iloc[idx],
                 "buy_date": dates.iloc[buy_idx],
                 "sell_date": dates.iloc[sell_idx],
-                "buy_price": price.iloc[buy_idx],
-                "sell_price": price.iloc[sell_idx],
-                "return": price.iloc[sell_idx] / price.iloc[buy_idx] - 1,
+                "buy_price": exec_buy_price,
+                "sell_price": exec_sell_price,
+                "return": exec_sell_price / exec_buy_price - 1,
                 "exit_reason": reason,
                 "m": m,
                 "n": n,
                 "hv": hv.iloc[buy_idx],
                 "signal_intensity": intensity.iloc[idx],
+                "intensity_level": df.iloc[idx].get("intensity_level", "none"),
             }
         )
     return pd.DataFrame(rows)

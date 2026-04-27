@@ -6,7 +6,7 @@ from fund_predictor.backtest.grid_search import run_grid_search
 from fund_predictor.backtest.walk_forward import append_tuning_history, run_walk_forward
 from fund_predictor.config import load_config
 from fund_predictor.data.fetcher import fetch_and_update_fund
-from fund_predictor.data.storage import load_nav
+from fund_predictor.data.storage import init_sqlite_cache, load_nav
 from fund_predictor.features.indicators import add_indicators
 from fund_predictor.report.renderer import render_reports
 from fund_predictor.trade.manager import (
@@ -68,6 +68,36 @@ def _persist_status(meta_dir: str, statuses: list[dict]) -> None:
     (Path(meta_dir) / "fetch_status.json").write_text(json.dumps(statuses, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _check_data_quality(df, cfg: dict) -> tuple[bool, str]:
+    """
+    轻量数据质量过滤：
+    - 缺失率过高 -> 跳过
+    - 异常跳变比例过高 -> 跳过
+    """
+    q = cfg.get("quality", {})
+    max_missing = float(q.get("max_missing_ratio", 0.08))
+    abnormal_th = float(q.get("abnormal_return_threshold", 0.25))
+    max_abnormal = float(q.get("max_abnormal_ratio", 0.02))
+
+    if "acc_nav" not in df.columns and "unit_nav" not in df.columns:
+        return False, "缺少净值列"
+    if "acc_nav" in df.columns and "unit_nav" in df.columns:
+        price = df["acc_nav"].fillna(df["unit_nav"])
+    elif "acc_nav" in df.columns:
+        price = df["acc_nav"]
+    else:
+        price = df["unit_nav"]
+    missing_ratio = float(price.isna().mean())
+    if missing_ratio > max_missing:
+        return False, f"数据缺失率过高({missing_ratio:.2%})"
+
+    ret = price.pct_change().replace([float("inf"), float("-inf")], float("nan"))
+    abnormal_ratio = float((ret.abs() > abnormal_th).mean())
+    if abnormal_ratio > max_abnormal:
+        return False, f"异常跳变比例过高({abnormal_ratio:.2%})"
+    return True, ""
+
+
 def analyze(args):
     """一体化流程：更新数据 -> 计算特征 -> 网格回测 -> 生成报告。"""
     cfg = load_config(args.config)
@@ -86,6 +116,14 @@ def analyze(args):
             statuses[-1]["status_cn"] = 状态中文映射.get(statuses[-1]["status"], statuses[-1]["status"])
             continue
         statuses[-1]["status_cn"] = 状态中文映射.get(statuses[-1]["status"], statuses[-1]["status"])
+
+        ok, reason = _check_data_quality(df, cfg)
+        if not ok:
+            statuses[-1]["status"] = "insufficient_data"
+            statuses[-1]["status_cn"] = "数据质量不足"
+            statuses[-1]["reason"] = reason
+            statuses[-1]["used_in_analysis"] = False
+            continue
 
         # 先计算技术指标，再进入参数搜索与回测。
         idf = add_indicators(df, cfg)
@@ -296,6 +334,10 @@ def init_db_cmd(args):
             return 0
     msg = init_portfolio_db(cfg["storage"]["meta_dir"], reset=args.reset)
     print(msg)
+
+    # 同步初始化净值 SQLite 缓存库（若未启用 sqlite，仅执行建库不会影响当前逻辑）。
+    sqlite_msg = init_sqlite_cache(cfg["storage"].get("sqlite_path", "data/meta/nav_cache.db"))
+    print(sqlite_msg)
     return 0
 
 
@@ -311,7 +353,15 @@ def _build_latest_price_map(cfg: dict, positions: list[dict]) -> dict[str, float
         code = pos.get("fund_code")
         if not code:
             continue
-        df = load_nav(nav_dir, str(code), fmt)
+        df = load_nav(
+            nav_dir,
+            str(code),
+            fmt,
+            backend=cfg["storage"].get("backend", "file"),
+            sqlite_path=cfg["storage"].get("sqlite_path", "data/meta/nav_cache.db"),
+            use_memory_cache=cfg["storage"].get("use_memory_cache", True),
+            memory_cache_size=cfg["storage"].get("memory_cache_size", 128),
+        )
         if df.empty:
             continue
         row = df.sort_values("nav_date").iloc[-1]
@@ -375,7 +425,6 @@ def console_cmd(args):
     """
     交互控制台应用：
     1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 8 撤销最近订单 0 退出
-    1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 0 退出
     """
     # 在交互控制台中记录“最近使用基金代码”，用于减少重复输入成本。
     last_fund_code = ""
@@ -438,8 +487,6 @@ def console_cmd(args):
             args.trade_date = input("请输入买入日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入买入净值")
             args.shares = _input_float("请输入买入份额")
-            args.price = float(input("请输入买入净值：").strip())
-            args.shares = float(input("请输入买入份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             buy_cmd(args)
             continue
@@ -449,8 +496,6 @@ def console_cmd(args):
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入卖出净值")
             args.shares = _input_float("请输入卖出份额")
-            args.price = float(input("请输入卖出净值：").strip())
-            args.shares = float(input("请输入卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             args.yes = True
             sell_cmd(args)
@@ -461,8 +506,6 @@ def console_cmd(args):
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入部分卖出净值")
             args.shares = _input_float("请输入部分卖出份额")
-            args.price = float(input("请输入部分卖出净值：").strip())
-            args.shares = float(input("请输入部分卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             args.yes = True
             partial_sell_cmd(args)

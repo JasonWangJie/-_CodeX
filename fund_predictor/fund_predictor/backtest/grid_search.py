@@ -22,6 +22,7 @@ def run_grid_search(df, cfg: dict):
     min_trades = cfg["strategy"]["min_trades"]
     win_target = cfg["strategy"]["win_target"]
     m_values, n_values = _build_grid(cfg)
+    enh = cfg.get("enhancement", {})
 
     best = None
     for r1_floor in cfg["threshold_scan"]["r1_candidates"]:
@@ -39,7 +40,14 @@ def run_grid_search(df, cfg: dict):
                     metrics = summarize_performance(trades, win_target)
                     if metrics["trade_count"] < min_trades:
                         continue
-                    score = score_strategy(metrics, m, n, cfg)
+                    # 近期窗口加权：对最近一段交易表现做独立得分，抑制“只在远古区间有效”的参数。
+                    recent_score = 0.0
+                    if enh.get("enable_recent_weight", True) and not trades.empty:
+                        ratio = float(enh.get("recent_window_ratio", 0.2))
+                        k = max(1, int(len(trades) * ratio))
+                        recent = trades.sort_values("sell_date").tail(k)
+                        recent_score = float((recent["return"] > win_target).mean())
+                    score = score_strategy(metrics, m, n, cfg, recent_validation_score=recent_score)
                     if best is None or score > best["score"]:
                         best = {
                             "score": score,

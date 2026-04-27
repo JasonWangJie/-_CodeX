@@ -29,4 +29,14 @@ def add_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     q = cfg["feature"]["quantile_level"]
     out["r1_q"] = out["R1"].shift(1).expanding().quantile(q)
     out["r2_q"] = out["R2"].shift(1).expanding().quantile(q)
+
+    # 轻量“市场状态过滤”特征：
+    # 使用短均线与长均线关系判断趋势状态，不依赖额外外部指数数据。
+    enh = cfg.get("enhancement", {})
+    short_w = int(enh.get("regime_short_window", 20))
+    long_w = int(enh.get("regime_long_window", 60))
+    out["ma_short"] = price.rolling(short_w).mean()
+    out["ma_long"] = price.rolling(long_w).mean()
+    # 1=趋势偏强（允许信号）；0=趋势偏弱（可过滤信号）
+    out["regime_ok"] = (out["ma_short"] >= out["ma_long"]).astype(int)
     return out

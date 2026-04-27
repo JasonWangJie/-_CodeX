@@ -18,6 +18,8 @@ data_source:
   retry_sleep_seconds: 1.5
   # 是否启用增量更新：true=只拉取本地最新日期之后的数据；false=每次全量
   use_incremental_update: true
+  # 网络异常时是否优先回退到本地缓存数据继续分析
+  local_cache_first_on_fetch_error: true
 
 storage:
   # 基金净值缓存目录（每个基金一个 parquet/csv 文件）
@@ -28,6 +30,14 @@ storage:
   output_dir: "output/reports"
   # 净值存储格式：parquet 或 csv
   file_format: "parquet"
+  # 缓存后端：file（parquet/csv）或 sqlite（推荐批量分析）
+  backend: "file"
+  # SQLite 缓存路径（backend=sqlite 时生效）
+  sqlite_path: "data/meta/nav_cache.db"
+  # 是否启用进程内内存缓存（提升同轮次重复读取速度）
+  use_memory_cache: true
+  # 内存缓存最大基金数量（LRU淘汰）
+  memory_cache_size: 128
 
 feature:
   # R1短跌窗口列表（单位：交易日）；会分别计算 R1_3 / R1_5 / R1_15
@@ -64,6 +74,10 @@ strategy:
   take_profit_confirm_days: 10
   # 有效参数组合最少成交笔数（低于该值视为样本不足）
   min_trades: 8
+  # 单边交易成本费率（买入和卖出都会计入，0.001=千一）
+  transaction_cost_rate: 0.0005
+  # 单边滑点费率（用于近似成交偏差）
+  slippage_rate: 0.0005
 
 threshold_scan:
   # R1静态阈值候选列表（会逐个扫描）
@@ -94,3 +108,35 @@ runtime:
   log_level: "INFO"
   # 基金池JSON文件路径：未传 --funds/--fund-file 时自动从该文件读取基金代码
   funds_json: "data/meta/funds.json"
+
+quality:
+  # 数据缺失率上限（超过则跳过该基金的策略分析）
+  max_missing_ratio: 0.08
+  # 单日收益绝对值异常阈值（例如0.25=25%），用于识别净值异常跳变
+  abnormal_return_threshold: 0.25
+  # 异常跳变占比上限（超过则跳过该基金）
+  max_abnormal_ratio: 0.02
+
+enhancement:
+  # 是否启用趋势过滤（使用短均线与长均线判断市场状态）
+  enable_regime_filter: true
+  # 趋势过滤短均线窗口
+  regime_short_window: 20
+  # 趋势过滤长均线窗口
+  regime_long_window: 60
+  # 是否启用信号强度分层
+  enable_intensity_layer: true
+  # 强信号阈值（>= strong_threshold 视为强信号）
+  strong_threshold: 1.6
+  # 是否启用近期窗口加权
+  enable_recent_weight: true
+  # 近期窗口比例（用于计算 recent_validation_score）
+  recent_window_ratio: 0.2
+  # 是否启用双通道概率融合
+  enable_probability_fusion: true
+  # 低置信度过滤开关（true时仅放行融合概率达标信号）
+  enable_low_confidence_filter: true
+  # 融合概率放行阈值
+  min_signal_prob: 0.55
+  # 样本支持度阈值（支持度越高，越偏向直接二分类概率）
+  support_target: 50

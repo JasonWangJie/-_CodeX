@@ -5,6 +5,9 @@ from pathlib import Path
 import pandas as pd
 
 from fund_predictor.backtest.grid_search import run_grid_search
+from fund_predictor.backtest.scoring import score_strategy, summarize_performance
+from fund_predictor.backtest.simulator import simulate_trades
+from fund_predictor.features.signals import add_signals
 
 
 def run_walk_forward(df: pd.DataFrame, cfg: dict, fund_code: str) -> list[dict]:
@@ -31,6 +34,17 @@ def run_walk_forward(df: pd.DataFrame, cfg: dict, fund_code: str) -> list[dict]:
             cursor += pd.DateOffset(months=6)
             continue
 
+        # 使用训练阶段最优参数在验证窗口上独立评估，避免把训练分数误当验证分数。
+        valid_sig = add_signals(valid_df, best["r1_floor"], best["r2_floor"], cfg)
+        valid_trades = simulate_trades(valid_sig, best["m"], best["n"], cfg)
+        valid_metrics = summarize_performance(valid_trades, cfg["strategy"]["win_target"])
+        if valid_metrics.get("trade_count", 0) > 0:
+            valid_score = score_strategy(valid_metrics, best["m"], best["n"], cfg)
+            valid_trade_count = int(valid_metrics["trade_count"])
+        else:
+            valid_score = -999
+            valid_trade_count = 0
+
         record = {
             "fund_code": fund_code,
             "train_start": str(train_start.date()),
@@ -42,8 +56,8 @@ def run_walk_forward(df: pd.DataFrame, cfg: dict, fund_code: str) -> list[dict]:
             "r1_floor": best["r1_floor"],
             "r2_floor": best["r2_floor"],
             "train_score": best["score"],
-            "valid_score": best["score"],
-            "valid_trade_count": int(best["metrics"]["trade_count"]),
+            "valid_score": valid_score,
+            "valid_trade_count": valid_trade_count,
         }
         out.append(record)
         cursor += pd.DateOffset(months=6)
