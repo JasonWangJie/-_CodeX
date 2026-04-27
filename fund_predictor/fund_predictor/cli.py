@@ -8,6 +8,7 @@ from fund_predictor.config import load_config
 from fund_predictor.data.fetcher import fetch_and_update_fund
 from fund_predictor.features.indicators import add_indicators
 from fund_predictor.report.renderer import render_reports
+from fund_predictor.trade.manager import buy_fund, list_orders, list_positions, sell_fund, track_fund
 from fund_predictor.utils.logger import setup_logger
 from fund_predictor.utils.time_utils import now_str
 
@@ -101,6 +102,7 @@ def analyze(args):
 
 
 def update_data(args):
+    """仅执行数据更新，不进入回测和报告阶段。"""
     cfg = load_config(args.config)
     logger = setup_logger("output/logs", cfg["runtime"].get("log_level", "INFO"))
     funds = _load_funds(args)
@@ -110,6 +112,7 @@ def update_data(args):
 
 
 def backtest_only(args):
+    """复用 analyze 主流程，当前版本与 analyze 行为一致。"""
     return analyze(args)
 
 
@@ -121,6 +124,104 @@ def report_latest(args):
         print("未找到历史报告文件")
         return 1
     print(f"最新报告：{reports[-1]}")
+    return 0
+
+
+def buy_cmd(args):
+    """买入命令：用于登记建仓或加仓。"""
+    cfg = load_config(args.config)
+    pos = buy_fund(
+        meta_dir=cfg["storage"]["meta_dir"],
+        fund_code=args.fund_code,
+        fund_name=args.fund_name or "未知基金名称",
+        shares=args.shares,
+        price=args.price,
+        trade_date=args.trade_date,
+        note=args.note or "",
+    )
+    print(
+        f"买入记录成功：基金代码={pos['fund_code']}，基金名称={pos['fund_name']}，"
+        f"当前份额={pos['shares']}，持仓成本={pos['avg_cost']}"
+    )
+    return 0
+
+
+def track_cmd(args):
+    """跟踪命令：更新止盈止损及备注，不改动份额。"""
+    cfg = load_config(args.config)
+    pos = track_fund(
+        meta_dir=cfg["storage"]["meta_dir"],
+        fund_code=args.fund_code,
+        note=args.note,
+        take_profit=args.take_profit,
+        stop_loss=args.stop_loss,
+    )
+    print(
+        f"跟踪信息已更新：基金代码={pos['fund_code']}，基金名称={pos.get('fund_name', '未知基金名称')}，"
+        f"止盈={pos.get('take_profit')}，止损={pos.get('stop_loss')}，备注={pos.get('notes', '')}"
+    )
+    return 0
+
+
+def sell_cmd(args):
+    """卖出命令：用于全卖或按份额卖出。"""
+    cfg = load_config(args.config)
+    after = sell_fund(
+        meta_dir=cfg["storage"]["meta_dir"],
+        fund_code=args.fund_code,
+        shares=args.shares,
+        price=args.price,
+        trade_date=args.trade_date,
+        note=args.note or "",
+        order_type="sell",
+    )
+    print(f"卖出完成：基金代码={args.fund_code}，卖出份额={args.shares}，卖出价格={args.price}，卖后状态={after}")
+    return 0
+
+
+def partial_sell_cmd(args):
+    """部分卖出命令：语义上更明确，底层与卖出逻辑复用。"""
+    cfg = load_config(args.config)
+    after = sell_fund(
+        meta_dir=cfg["storage"]["meta_dir"],
+        fund_code=args.fund_code,
+        shares=args.shares,
+        price=args.price,
+        trade_date=args.trade_date,
+        note=args.note or "",
+        order_type="partial_sell",
+    )
+    print(f"部分卖出完成：基金代码={args.fund_code}，卖出份额={args.shares}，卖后状态={after}")
+    return 0
+
+
+def positions_cmd(args):
+    """查看当前持仓。"""
+    cfg = load_config(args.config)
+    positions = list_positions(cfg["storage"]["meta_dir"])
+    if not positions:
+        print("当前暂无持仓记录")
+        return 0
+    print("当前持仓列表：")
+    for item in positions:
+        print(
+            f"- 基金代码={item.get('fund_code')}，基金名称={item.get('fund_name')}，"
+            f"份额={item.get('shares')}，持仓成本={item.get('avg_cost')}，"
+            f"止盈={item.get('take_profit')}，止损={item.get('stop_loss')}，备注={item.get('notes', '')}"
+        )
+    return 0
+
+
+def history_cmd(args):
+    """查看交易流水历史。"""
+    cfg = load_config(args.config)
+    orders = list_orders(cfg["storage"]["meta_dir"], args.limit)
+    if not orders:
+        print("暂无交易流水")
+        return 0
+    print(f"最近 {len(orders)} 条交易流水：")
+    for item in orders:
+        print(item)
     return 0
 
 
@@ -149,10 +250,61 @@ def build_parser() -> argparse.ArgumentParser:
     p4 = sub.add_parser("report")
     p4.add_argument("--latest", action="store_true", help="显示最近一次生成的报告路径")
     p4.set_defaults(func=report_latest)
+
+    # 以下为交易执行与持仓管理相关命令：
+    # 1) buy: 买入/加仓
+    # 2) track: 跟踪止盈止损与备注
+    # 3) sell: 卖出（可用于全卖）
+    # 4) partial-sell: 部分卖出（语义化命令）
+    # 5) positions: 查看持仓
+    # 6) history: 查看订单流水
+    p5 = sub.add_parser("buy", help="登记买入或加仓")
+    p5.add_argument("--fund-code", required=True, help="基金代码")
+    p5.add_argument("--fund-name", default="", help="基金名称（可选）")
+    p5.add_argument("--shares", type=float, required=True, help="买入份额")
+    p5.add_argument("--price", type=float, required=True, help="买入单价")
+    p5.add_argument("--trade-date", help="交易日期，格式 YYYY-MM-DD，默认当天")
+    p5.add_argument("--note", help="备注信息")
+    p5.set_defaults(func=buy_cmd)
+
+    p6 = sub.add_parser("track", help="更新跟踪信息（止盈/止损/备注）")
+    p6.add_argument("--fund-code", required=True, help="基金代码")
+    p6.add_argument("--take-profit", type=float, help="止盈阈值（收益率，例如 0.12）")
+    p6.add_argument("--stop-loss", type=float, help="止损阈值（收益率，例如 -0.08）")
+    p6.add_argument("--note", help="跟踪备注")
+    p6.set_defaults(func=track_cmd)
+
+    p7 = sub.add_parser("sell", help="卖出基金")
+    p7.add_argument("--fund-code", required=True, help="基金代码")
+    p7.add_argument("--shares", type=float, required=True, help="卖出份额（全卖请填当前全部持仓）")
+    p7.add_argument("--price", type=float, required=True, help="卖出单价")
+    p7.add_argument("--trade-date", help="交易日期，格式 YYYY-MM-DD，默认当天")
+    p7.add_argument("--note", help="卖出备注")
+    p7.set_defaults(func=sell_cmd)
+
+    p8 = sub.add_parser("partial-sell", help="部分卖出基金")
+    p8.add_argument("--fund-code", required=True, help="基金代码")
+    p8.add_argument("--shares", type=float, required=True, help="部分卖出份额")
+    p8.add_argument("--price", type=float, required=True, help="卖出单价")
+    p8.add_argument("--trade-date", help="交易日期，格式 YYYY-MM-DD，默认当天")
+    p8.add_argument("--note", help="部分卖出备注")
+    p8.set_defaults(func=partial_sell_cmd)
+
+    p9 = sub.add_parser("positions", help="查看当前持仓")
+    p9.set_defaults(func=positions_cmd)
+
+    p10 = sub.add_parser("history", help="查看最近交易流水")
+    p10.add_argument("--limit", type=int, default=20, help="最多显示多少条流水，默认20")
+    p10.set_defaults(func=history_cmd)
     return parser
 
 
 def main() -> int:
+    """程序主入口：统一捕获可预期参数/业务错误并给出中文提示。"""
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        print(f"执行失败：{exc}")
+        return 1
