@@ -81,7 +81,12 @@ def _check_data_quality(df, cfg: dict) -> tuple[bool, str]:
 
     if "acc_nav" not in df.columns and "unit_nav" not in df.columns:
         return False, "缺少净值列"
-    price = df["acc_nav"].fillna(df["unit_nav"])
+    if "acc_nav" in df.columns and "unit_nav" in df.columns:
+        price = df["acc_nav"].fillna(df["unit_nav"])
+    elif "acc_nav" in df.columns:
+        price = df["acc_nav"]
+    else:
+        price = df["unit_nav"]
     missing_ratio = float(price.isna().mean())
     if missing_ratio > max_missing:
         return False, f"数据缺失率过高({missing_ratio:.2%})"

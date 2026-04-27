@@ -75,6 +75,12 @@ def _save_to_sqlite(sqlite_path: str, fund_code: str, df: pd.DataFrame) -> None:
         conn.execute("DELETE FROM nav_history WHERE fund_code = ?", [fund_code])
         write_df = df.copy()
         if not write_df.empty:
+            # 只保留表结构需要的列，避免上游新增字段导致 to_sql 失败。
+            expected_cols = ["fund_code", "nav_date", "unit_nav", "acc_nav", "daily_growth", "fund_name", "source", "fetch_time"]
+            for col in expected_cols:
+                if col not in write_df.columns:
+                    write_df[col] = None
+            write_df = write_df[expected_cols]
             write_df["nav_date"] = pd.to_datetime(write_df["nav_date"], errors="coerce").dt.strftime("%Y-%m-%d")
             write_df["fetch_time"] = write_df.get("fetch_time")
             write_df.to_sql("nav_history", conn, if_exists="append", index=False)
