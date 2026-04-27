@@ -43,3 +43,4 @@ python main.py console
 ```
 
 更多命令与交互流程请看：`docs/操作手册.md`。
+开发与维护细节请看：`docs/技术手册.md`。

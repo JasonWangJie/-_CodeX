@@ -265,3 +265,79 @@ def get_profit_summary(meta_dir: str, latest_prices: dict[str, float] | None = N
         "realized_details": realized_list,
         "unrealized_details": unrealized_details,
     }
+
+
+def undo_last_order(meta_dir: str) -> dict[str, Any]:
+    """
+    撤销最近一笔订单（仅本地账本层面）。
+    支持撤销类型：buy / sell / partial_sell / track。
+    """
+    data = load_portfolio(meta_dir)
+    orders = data.get("orders", [])
+    if not orders:
+        raise ValueError("暂无可撤销的订单")
+
+    last = orders.pop()
+    order_type = last.get("type")
+    code = str(last.get("fund_code", ""))
+    pos = data.get("positions", {}).get(code)
+
+    if order_type == "buy":
+        # 撤销买入：从当前持仓扣回本次买入份额，并按剩余成本回退。
+        if not pos:
+            raise ValueError("撤销失败：当前无该基金持仓，无法回退买入")
+        buy_shares = float(last.get("shares", 0.0))
+        buy_price = float(last.get("price", 0.0))
+        cur_shares = float(pos.get("shares", 0.0))
+        cur_avg = float(pos.get("avg_cost", 0.0))
+        if buy_shares > cur_shares:
+            raise ValueError("撤销失败：当前持仓份额小于待撤销买入份额")
+        remain = cur_shares - buy_shares
+        if remain <= 0:
+            data["positions"].pop(code, None)
+        else:
+            # 由加权平均公式反推剩余成本。
+            remain_cost = (cur_shares * cur_avg - buy_shares * buy_price) / remain
+            pos["shares"] = round(remain, 6)
+            pos["avg_cost"] = round(remain_cost, 6)
+            pos["updated_at"] = datetime.utcnow().isoformat()
+
+    elif order_type in {"sell", "partial_sell"}:
+        # 撤销卖出：把卖出的份额加回持仓，并恢复成本（卖出不改变成本）。
+        sell_shares = float(last.get("shares", 0.0))
+        cost_basis = float(last.get("cost_basis", 0.0))
+        if not pos:
+            data["positions"][code] = {
+                "fund_code": code,
+                "fund_name": last.get("fund_name", "未知基金名称"),
+                "shares": round(sell_shares, 6),
+                "avg_cost": round(cost_basis, 6),
+                "take_profit": None,
+                "stop_loss": None,
+                "notes": "",
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+        else:
+            pos["shares"] = round(float(pos.get("shares", 0.0)) + sell_shares, 6)
+            pos["avg_cost"] = round(cost_basis if cost_basis > 0 else float(pos.get("avg_cost", 0.0)), 6)
+            pos["updated_at"] = datetime.utcnow().isoformat()
+
+        # 同步撤销已实现收益记录（若最后一条对应此订单则删除）。
+        realized = data.get("realized_pnl", [])
+        if realized:
+            tail = realized[-1]
+            if (
+                str(tail.get("fund_code", "")) == code
+                and float(tail.get("shares", 0.0)) == sell_shares
+                and str(tail.get("order_type", "")) == order_type
+            ):
+                realized.pop()
+
+    elif order_type == "track":
+        # 撤销跟踪：当前版本不保存 track 前快照，因此仅删除流水并给出提示。
+        pass
+    else:
+        raise ValueError(f"不支持撤销的订单类型：{order_type}")
+
+    save_portfolio(meta_dir, data)
+    return {"undone_order": last, "message": "撤销成功"}

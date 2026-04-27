@@ -17,6 +17,7 @@ from fund_predictor.trade.manager import (
     list_positions,
     sell_fund,
     track_fund,
+    undo_last_order,
 )
 from fund_predictor.utils.logger import setup_logger
 from fund_predictor.utils.time_utils import now_str
@@ -271,6 +272,19 @@ def history_cmd(args):
     return 0
 
 
+def undo_last_cmd(args):
+    """撤销最近一笔订单。"""
+    cfg = load_config(args.config)
+    if not getattr(args, "yes", False):
+        confirm = input("确认撤销最近一笔订单？输入 yes 确认：").strip().lower()
+        if confirm != "yes":
+            print("已取消撤销操作。")
+            return 0
+    result = undo_last_order(cfg["storage"]["meta_dir"])
+    print("撤销结果：", result)
+    return 0
+
+
 def init_db_cmd(args):
     """初始化或重置本地交易数据库。"""
     cfg = load_config(args.config)
@@ -360,6 +374,7 @@ def profit_summary_cmd(args):
 def console_cmd(args):
     """
     交互控制台应用：
+    1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 8 撤销最近订单 0 退出
     1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 0 退出
     """
     # 在交互控制台中记录“最近使用基金代码”，用于减少重复输入成本。
@@ -372,6 +387,18 @@ def console_cmd(args):
             return text or default_value
         return input(f"{prompt}：").strip()
 
+    def _input_float(prompt: str, default_value: float | None = None) -> float:
+        """带重试的浮点数输入，避免一次输错导致流程中断。"""
+        while True:
+            if default_value is None:
+                raw = input(f"{prompt}：").strip()
+            else:
+                raw = input(f"{prompt}（回车沿用 {default_value}）：").strip() or str(default_value)
+            try:
+                return float(raw)
+            except ValueError:
+                print("输入格式错误，请输入数字。")
+
     while True:
         print("\n=== 基金控制台 ===")
         print("1. 整体跑一遍（analyze）")
@@ -381,6 +408,7 @@ def console_cmd(args):
         print("5. 部分卖出（partial-sell）")
         print("6. 初始化数据库（init-db）")
         print("7. 查询收益（profit-summary）")
+        print("8. 撤销最近订单（undo-last）")
         print("0. 退出")
         choice = input("请输入菜单编号：").strip()
 
@@ -408,6 +436,8 @@ def console_cmd(args):
             last_fund_code = args.fund_code
             args.fund_name = input("请输入基金名称（可留空）：").strip()
             args.trade_date = input("请输入买入日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = _input_float("请输入买入净值")
+            args.shares = _input_float("请输入买入份额")
             args.price = float(input("请输入买入净值：").strip())
             args.shares = float(input("请输入买入份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
@@ -417,6 +447,8 @@ def console_cmd(args):
             args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
             last_fund_code = args.fund_code
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = _input_float("请输入卖出净值")
+            args.shares = _input_float("请输入卖出份额")
             args.price = float(input("请输入卖出净值：").strip())
             args.shares = float(input("请输入卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
@@ -427,6 +459,8 @@ def console_cmd(args):
             args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
             last_fund_code = args.fund_code
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = _input_float("请输入部分卖出净值")
+            args.shares = _input_float("请输入部分卖出份额")
             args.price = float(input("请输入部分卖出净值：").strip())
             args.shares = float(input("请输入部分卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
@@ -441,6 +475,10 @@ def console_cmd(args):
             continue
         if choice == "7":
             profit_summary_cmd(args)
+            continue
+        if choice == "8":
+            args.yes = True
+            undo_last_cmd(args)
             continue
 
         print("无效输入，请重新选择。")
@@ -520,6 +558,10 @@ def build_parser() -> argparse.ArgumentParser:
     p10.add_argument("--limit", type=int, default=20, help="最多显示多少条流水，默认20")
     p10.set_defaults(func=history_cmd)
 
+    p10b = sub.add_parser("undo-last", help="撤销最近一笔订单")
+    p10b.add_argument("--yes", action="store_true", help="跳过撤销确认")
+    p10b.set_defaults(func=undo_last_cmd)
+
     p11 = sub.add_parser("init-db", help="初始化本地交易数据库")
     p11.add_argument("--reset", action="store_true", help="重置数据库（会清空历史）")
     p11.add_argument("--yes", action="store_true", help="跳过重置确认")
@@ -530,6 +572,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p13 = sub.add_parser("console", help="交互控制台菜单")
     p13.set_defaults(func=console_cmd)
+
+    p14 = sub.add_parser("daily-run", help="一键执行日常流程：analyze + profit-summary")
+
+    def _daily_run_cmd(daily_args):
+        # 先跑策略分析，再输出收益概览，作为日常巡检入口。
+        analyze(daily_args)
+        profit_summary_cmd(daily_args)
+        return 0
+
+    p14.set_defaults(func=_daily_run_cmd)
     return parser
 
 
