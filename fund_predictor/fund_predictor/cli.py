@@ -198,6 +198,13 @@ def track_cmd(args):
 def sell_cmd(args):
     """卖出命令：用于全卖或按份额卖出。"""
     cfg = load_config(args.config)
+    if not getattr(args, "yes", False):
+        confirm = input(
+            f"确认卖出？基金代码={args.fund_code}，份额={args.shares}，价格={args.price}。输入 yes 确认："
+        ).strip().lower()
+        if confirm != "yes":
+            print("已取消卖出操作。")
+            return 0
     after = sell_fund(
         meta_dir=cfg["storage"]["meta_dir"],
         fund_code=args.fund_code,
@@ -214,6 +221,13 @@ def sell_cmd(args):
 def partial_sell_cmd(args):
     """部分卖出命令：语义上更明确，底层与卖出逻辑复用。"""
     cfg = load_config(args.config)
+    if not getattr(args, "yes", False):
+        confirm = input(
+            f"确认部分卖出？基金代码={args.fund_code}，份额={args.shares}，价格={args.price}。输入 yes 确认："
+        ).strip().lower()
+        if confirm != "yes":
+            print("已取消部分卖出操作。")
+            return 0
     after = sell_fund(
         meta_dir=cfg["storage"]["meta_dir"],
         fund_code=args.fund_code,
@@ -260,6 +274,12 @@ def history_cmd(args):
 def init_db_cmd(args):
     """初始化或重置本地交易数据库。"""
     cfg = load_config(args.config)
+    # reset 场景属于高风险动作，默认二次确认，避免误清空历史数据。
+    if getattr(args, "reset", False) and not getattr(args, "yes", False):
+        confirm = input("你正在执行重置数据库操作，历史记录将被清空。输入 yes 确认：").strip().lower()
+        if confirm != "yes":
+            print("已取消重置操作。")
+            return 0
     msg = init_portfolio_db(cfg["storage"]["meta_dir"], reset=args.reset)
     print(msg)
     return 0
@@ -306,13 +326,34 @@ def profit_summary_cmd(args):
     print(f"- 总收益（已实现+未实现）：{summary['total_pnl']:.6f}")
     print(f"- 历史卖出记录数：{summary['realized_count']}")
 
-    print("\n未实现收益明细（当前持仓）：")
-    for item in summary["unrealized_details"]:
-        print(item)
+    def _render_table(title: str, columns: list[str], rows: list[dict]) -> None:
+        """
+        终端文本表格渲染器：
+        - 无需额外依赖（如 tabulate）；
+        - 统一字段顺序，提升可读性。
+        """
+        print(f"\n{title}")
+        if not rows:
+            print("（无数据）")
+            return
+        widths = {col: max(len(col), *(len(str(r.get(col, ""))) for r in rows)) for col in columns}
+        header = " | ".join(col.ljust(widths[col]) for col in columns)
+        sep = "-+-".join("-" * widths[col] for col in columns)
+        print(header)
+        print(sep)
+        for row in rows:
+            print(" | ".join(str(row.get(col, "")).ljust(widths[col]) for col in columns))
 
-    print("\n已实现收益明细（历史卖出）：")
-    for item in summary["realized_details"]:
-        print(item)
+    _render_table(
+        "未实现收益明细（当前持仓）",
+        ["fund_code", "fund_name", "shares", "avg_cost", "latest_price", "unrealized_pnl", "unrealized_return"],
+        summary["unrealized_details"],
+    )
+    _render_table(
+        "已实现收益明细（历史卖出）",
+        ["fund_code", "fund_name", "trade_date", "shares", "sell_price", "cost_basis", "realized_pnl", "realized_return", "order_type"],
+        summary["realized_details"],
+    )
     return 0
 
 
@@ -321,6 +362,16 @@ def console_cmd(args):
     交互控制台应用：
     1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 0 退出
     """
+    # 在交互控制台中记录“最近使用基金代码”，用于减少重复输入成本。
+    last_fund_code = ""
+
+    def _input_with_default(prompt: str, default_value: str = "") -> str:
+        """支持回车复用默认值的输入函数。"""
+        if default_value:
+            text = input(f"{prompt}（回车沿用 {default_value}）：").strip()
+            return text or default_value
+        return input(f"{prompt}：").strip()
+
     while True:
         print("\n=== 基金控制台 ===")
         print("1. 整体跑一遍（analyze）")
@@ -343,7 +394,8 @@ def console_cmd(args):
             analyze(args)
             continue
         if choice == "2":
-            args.fund_code = input("请输入基金代码：").strip()
+            args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
+            last_fund_code = args.fund_code
             tp = input("请输入止盈阈值（可留空）：").strip()
             sl = input("请输入止损阈值（可留空）：").strip()
             args.take_profit = float(tp) if tp else None
@@ -352,7 +404,8 @@ def console_cmd(args):
             track_cmd(args)
             continue
         if choice == "3":
-            args.fund_code = input("请输入基金代码：").strip()
+            args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
+            last_fund_code = args.fund_code
             args.fund_name = input("请输入基金名称（可留空）：").strip()
             args.trade_date = input("请输入买入日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = float(input("请输入买入净值：").strip())
@@ -361,24 +414,29 @@ def console_cmd(args):
             buy_cmd(args)
             continue
         if choice == "4":
-            args.fund_code = input("请输入基金代码：").strip()
+            args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
+            last_fund_code = args.fund_code
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = float(input("请输入卖出净值：").strip())
             args.shares = float(input("请输入卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
+            args.yes = True
             sell_cmd(args)
             continue
         if choice == "5":
-            args.fund_code = input("请输入基金代码：").strip()
+            args.fund_code = _input_with_default("请输入基金代码", last_fund_code)
+            last_fund_code = args.fund_code
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = float(input("请输入部分卖出净值：").strip())
             args.shares = float(input("请输入部分卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
+            args.yes = True
             partial_sell_cmd(args)
             continue
         if choice == "6":
             reset = input("是否重置已有数据库？输入 yes 表示重置：").strip().lower() == "yes"
             args.reset = reset
+            args.yes = True
             init_db_cmd(args)
             continue
         if choice == "7":
@@ -443,6 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
     p7.add_argument("--price", type=float, required=True, help="卖出单价")
     p7.add_argument("--trade-date", help="交易日期，格式 YYYY-MM-DD，默认当天")
     p7.add_argument("--note", help="卖出备注")
+    p7.add_argument("--yes", action="store_true", help="跳过卖出确认")
     p7.set_defaults(func=sell_cmd)
 
     p8 = sub.add_parser("partial-sell", help="部分卖出基金")
@@ -451,6 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
     p8.add_argument("--price", type=float, required=True, help="卖出单价")
     p8.add_argument("--trade-date", help="交易日期，格式 YYYY-MM-DD，默认当天")
     p8.add_argument("--note", help="部分卖出备注")
+    p8.add_argument("--yes", action="store_true", help="跳过部分卖出确认")
     p8.set_defaults(func=partial_sell_cmd)
 
     p9 = sub.add_parser("positions", help="查看当前持仓")
@@ -462,6 +522,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p11 = sub.add_parser("init-db", help="初始化本地交易数据库")
     p11.add_argument("--reset", action="store_true", help="重置数据库（会清空历史）")
+    p11.add_argument("--yes", action="store_true", help="跳过重置确认")
     p11.set_defaults(func=init_db_cmd)
 
     p12 = sub.add_parser("profit-summary", help="查询收益明细与概览")
