@@ -49,6 +49,17 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def init_sqlite_cache(sqlite_path: str) -> str:
+    """
+    初始化净值 SQLite 缓存库（仅建库建表，不清空历史数据）。
+    """
+    path = Path(sqlite_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        _ensure_sqlite_schema(conn)
+    return f"SQLite缓存初始化成功：{path}"
+
+
 def _load_from_sqlite(sqlite_path: str, fund_code: str) -> pd.DataFrame:
     path = Path(sqlite_path)
     if not path.exists():

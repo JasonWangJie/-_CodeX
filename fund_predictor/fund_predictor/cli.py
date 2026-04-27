@@ -6,7 +6,7 @@ from fund_predictor.backtest.grid_search import run_grid_search
 from fund_predictor.backtest.walk_forward import append_tuning_history, run_walk_forward
 from fund_predictor.config import load_config
 from fund_predictor.data.fetcher import fetch_and_update_fund
-from fund_predictor.data.storage import load_nav
+from fund_predictor.data.storage import init_sqlite_cache, load_nav
 from fund_predictor.features.indicators import add_indicators
 from fund_predictor.report.renderer import render_reports
 from fund_predictor.trade.manager import (
@@ -334,6 +334,10 @@ def init_db_cmd(args):
             return 0
     msg = init_portfolio_db(cfg["storage"]["meta_dir"], reset=args.reset)
     print(msg)
+
+    # 同步初始化净值 SQLite 缓存库（若未启用 sqlite，仅执行建库不会影响当前逻辑）。
+    sqlite_msg = init_sqlite_cache(cfg["storage"].get("sqlite_path", "data/meta/nav_cache.db"))
+    print(sqlite_msg)
     return 0
 
 
