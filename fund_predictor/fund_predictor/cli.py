@@ -375,6 +375,7 @@ def console_cmd(args):
     """
     交互控制台应用：
     1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 8 撤销最近订单 0 退出
+    1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 0 退出
     """
     # 在交互控制台中记录“最近使用基金代码”，用于减少重复输入成本。
     last_fund_code = ""
@@ -437,6 +438,8 @@ def console_cmd(args):
             args.trade_date = input("请输入买入日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入买入净值")
             args.shares = _input_float("请输入买入份额")
+            args.price = float(input("请输入买入净值：").strip())
+            args.shares = float(input("请输入买入份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             buy_cmd(args)
             continue
@@ -446,6 +449,8 @@ def console_cmd(args):
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入卖出净值")
             args.shares = _input_float("请输入卖出份额")
+            args.price = float(input("请输入卖出净值：").strip())
+            args.shares = float(input("请输入卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             args.yes = True
             sell_cmd(args)
@@ -456,6 +461,8 @@ def console_cmd(args):
             args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
             args.price = _input_float("请输入部分卖出净值")
             args.shares = _input_float("请输入部分卖出份额")
+            args.price = float(input("请输入部分卖出净值：").strip())
+            args.shares = float(input("请输入部分卖出份额：").strip())
             args.note = input("请输入备注（可留空）：").strip() or None
             args.yes = True
             partial_sell_cmd(args)
