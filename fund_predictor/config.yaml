@@ -132,3 +132,11 @@ enhancement:
   enable_recent_weight: true
   # 近期窗口比例（用于计算 recent_validation_score）
   recent_window_ratio: 0.2
+  # 是否启用双通道概率融合
+  enable_probability_fusion: true
+  # 低置信度过滤开关（true时仅放行融合概率达标信号）
+  enable_low_confidence_filter: true
+  # 融合概率放行阈值
+  min_signal_prob: 0.55
+  # 样本支持度阈值（支持度越高，越偏向直接二分类概率）
+  support_target: 50
