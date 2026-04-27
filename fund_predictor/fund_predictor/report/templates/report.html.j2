@@ -7,7 +7,7 @@
 <h2>结果排名</h2>
 <ul>
 {% for item in ranking %}
-<li>{{ item.fund_code }} | score={{ '%.4f'|format(item.score) }} | M={{ item.m }} N={{ item.n }}</li>
+<li>基金代码：{{ item.fund_code }} | 基金名称：{{ item.fund_name or "未知基金名称" }} | 综合得分={{ '%.4f'|format(item.score) }} | M={{ item.m }} | N={{ item.n }}</li>
 {% endfor %}
 </ul>
 <h2>风险提示</h2>

@@ -6,6 +6,7 @@ from jinja2 import Environment, FileSystemLoader
 
 
 def render_reports(context: dict, output_dir: str, stamp: str) -> dict:
+    """按统一时间戳输出 Markdown / HTML / JSON / CSV 四类报告文件。"""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     tpl_dir = Path(__file__).parent / "templates"
     env = Environment(loader=FileSystemLoader(tpl_dir), autoescape=False)
@@ -22,6 +23,7 @@ def render_reports(context: dict, output_dir: str, stamp: str) -> dict:
     html_path.write_text(html, encoding="utf-8")
     json_path.write_text(json.dumps(context, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
 
+    # 将各基金的逐笔交易明细合并为一个CSV，便于进一步分析与二次可视化。
     trades = []
     for x in context.get("ranking", []):
         t = x.get("trades")

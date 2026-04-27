@@ -9,22 +9,24 @@ PAGES_RE = re.compile(r"pages:(\d+)")
 
 
 def parse_pages(raw_text: str) -> int:
+    """从接口返回的JS片段中提取总页数。"""
     match = PAGES_RE.search(raw_text)
     if not match:
-        raise ParseError("Unable to parse pages from response")
+        raise ParseError("无法从响应内容中解析总页数 pages")
     return int(match.group(1))
 
 
 def parse_records_table(raw_text: str) -> pd.DataFrame:
+    """从接口返回的HTML表格中解析净值记录。"""
     start = raw_text.find("<table")
     end = raw_text.rfind("</table>")
     if start < 0 or end < 0:
-        raise ParseError("Unable to locate records table")
+        raise ParseError("响应中未找到净值表格")
     html = raw_text[start : end + len("</table>")]
     soup = BeautifulSoup(html, "lxml")
     table = soup.find("table")
     if table is None:
-        raise ParseError("Empty table")
+        raise ParseError("净值表格为空")
 
     rows = []
     for tr in table.find_all("tr"):

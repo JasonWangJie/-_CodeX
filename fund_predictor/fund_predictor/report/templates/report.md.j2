@@ -8,17 +8,17 @@
 
 ## 2. 数据获取状态
 {% for s in statuses %}
-- {{ s.fund_code }}: {{ s.status }} {% if s.reason %}({{ s.reason }}){% endif %}
+- 基金代码：{{ s.fund_code }} | 基金名称：{{ s.fund_name or "未知基金名称" }} | 状态：{{ s.status_cn or s.status }} {% if s.reason %}| 原因：{{ s.reason }}{% endif %}
 {% endfor %}
 
 ## 3. 基金分析结果排名
 {% for item in ranking %}
-- {{ loop.index }}. {{ item.fund_code }} | score={{ '%.4f'|format(item.score) }} | M={{ item.m }} N={{ item.n }} | intensity={{ '%.2f'|format(item.signal_intensity) }}
+- {{ loop.index }}. 基金代码：{{ item.fund_code }} | 基金名称：{{ item.fund_name or "未知基金名称" }} | 综合得分={{ '%.4f'|format(item.score) }} | 买入延迟M={{ item.m }} | 持有期N={{ item.n }} | 信号强度={{ '%.2f'|format(item.signal_intensity) }}
 {% endfor %}
 
 ## 9. 失败基金与跳过原因
 {% for s in statuses if not s.used_in_analysis %}
-- {{ s.fund_code }}: {{ s.status }} {% if s.reason %}({{ s.reason }}){% endif %}
+- 基金代码：{{ s.fund_code }} | 基金名称：{{ s.fund_name or "未知基金名称" }} | 状态：{{ s.status_cn or s.status }} {% if s.reason %}| 原因：{{ s.reason }}{% endif %}
 {% endfor %}
 
 ## 10. 风险提示
