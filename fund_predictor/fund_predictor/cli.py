@@ -6,9 +6,18 @@ from fund_predictor.backtest.grid_search import run_grid_search
 from fund_predictor.backtest.walk_forward import append_tuning_history, run_walk_forward
 from fund_predictor.config import load_config
 from fund_predictor.data.fetcher import fetch_and_update_fund
+from fund_predictor.data.storage import load_nav
 from fund_predictor.features.indicators import add_indicators
 from fund_predictor.report.renderer import render_reports
-from fund_predictor.trade.manager import buy_fund, list_orders, list_positions, sell_fund, track_fund
+from fund_predictor.trade.manager import (
+    buy_fund,
+    get_profit_summary,
+    init_portfolio_db,
+    list_orders,
+    list_positions,
+    sell_fund,
+    track_fund,
+)
 from fund_predictor.utils.logger import setup_logger
 from fund_predictor.utils.time_utils import now_str
 
@@ -225,6 +234,136 @@ def history_cmd(args):
     return 0
 
 
+def init_db_cmd(args):
+    """初始化或重置本地交易数据库。"""
+    cfg = load_config(args.config)
+    msg = init_portfolio_db(cfg["storage"]["meta_dir"], reset=args.reset)
+    print(msg)
+    return 0
+
+
+def _build_latest_price_map(cfg: dict, positions: list[dict]) -> dict[str, float]:
+    """
+    从本地净值缓存中读取各持仓基金最新净值，作为未实现收益计算输入。
+    价格优先级：acc_nav > unit_nav。
+    """
+    price_map: dict[str, float] = {}
+    nav_dir = cfg["storage"]["nav_dir"]
+    fmt = cfg["storage"]["file_format"]
+    for pos in positions:
+        code = pos.get("fund_code")
+        if not code:
+            continue
+        df = load_nav(nav_dir, str(code), fmt)
+        if df.empty:
+            continue
+        row = df.sort_values("nav_date").iloc[-1]
+        acc = row.get("acc_nav")
+        unit = row.get("unit_nav")
+        price = acc if acc is not None else unit
+        if price is None:
+            continue
+        try:
+            price_map[str(code)] = float(price)
+        except (TypeError, ValueError):
+            continue
+    return price_map
+
+
+def profit_summary_cmd(args):
+    """查询收益明细与收益概览（已实现 + 未实现）。"""
+    cfg = load_config(args.config)
+    positions = list_positions(cfg["storage"]["meta_dir"])
+    latest_price_map = _build_latest_price_map(cfg, positions)
+    summary = get_profit_summary(cfg["storage"]["meta_dir"], latest_prices=latest_price_map)
+
+    print("收益概览：")
+    print(f"- 已实现收益合计：{summary['realized_total']:.6f}")
+    print(f"- 未实现收益合计：{summary['unrealized_total']:.6f}")
+    print(f"- 总收益（已实现+未实现）：{summary['total_pnl']:.6f}")
+    print(f"- 历史卖出记录数：{summary['realized_count']}")
+
+    print("\n未实现收益明细（当前持仓）：")
+    for item in summary["unrealized_details"]:
+        print(item)
+
+    print("\n已实现收益明细（历史卖出）：")
+    for item in summary["realized_details"]:
+        print(item)
+    return 0
+
+
+def console_cmd(args):
+    """
+    交互控制台应用：
+    1 整体跑一遍 2 跟踪 3 买入 4 卖出 5 部分卖出 6 初始化数据库 7 查询收益 0 退出
+    """
+    while True:
+        print("\n=== 基金控制台 ===")
+        print("1. 整体跑一遍（analyze）")
+        print("2. 跟踪（track）")
+        print("3. 买入（buy）")
+        print("4. 卖出（sell）")
+        print("5. 部分卖出（partial-sell）")
+        print("6. 初始化数据库（init-db）")
+        print("7. 查询收益（profit-summary）")
+        print("0. 退出")
+        choice = input("请输入菜单编号：").strip()
+
+        if choice == "0":
+            print("已退出控制台。")
+            return 0
+        if choice == "1":
+            funds_text = input("请输入基金代码（空格分隔）：").strip()
+            args.funds = [x for x in funds_text.split() if x]
+            analyze(args)
+            continue
+        if choice == "2":
+            args.fund_code = input("请输入基金代码：").strip()
+            tp = input("请输入止盈阈值（可留空）：").strip()
+            sl = input("请输入止损阈值（可留空）：").strip()
+            args.take_profit = float(tp) if tp else None
+            args.stop_loss = float(sl) if sl else None
+            args.note = input("请输入跟踪备注（可留空）：").strip() or None
+            track_cmd(args)
+            continue
+        if choice == "3":
+            args.fund_code = input("请输入基金代码：").strip()
+            args.fund_name = input("请输入基金名称（可留空）：").strip()
+            args.trade_date = input("请输入买入日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = float(input("请输入买入净值：").strip())
+            args.shares = float(input("请输入买入份额：").strip())
+            args.note = input("请输入备注（可留空）：").strip() or None
+            buy_cmd(args)
+            continue
+        if choice == "4":
+            args.fund_code = input("请输入基金代码：").strip()
+            args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = float(input("请输入卖出净值：").strip())
+            args.shares = float(input("请输入卖出份额：").strip())
+            args.note = input("请输入备注（可留空）：").strip() or None
+            sell_cmd(args)
+            continue
+        if choice == "5":
+            args.fund_code = input("请输入基金代码：").strip()
+            args.trade_date = input("请输入卖出日期（YYYY-MM-DD，可留空默认当天）：").strip() or None
+            args.price = float(input("请输入部分卖出净值：").strip())
+            args.shares = float(input("请输入部分卖出份额：").strip())
+            args.note = input("请输入备注（可留空）：").strip() or None
+            partial_sell_cmd(args)
+            continue
+        if choice == "6":
+            reset = input("是否重置已有数据库？输入 yes 表示重置：").strip().lower() == "yes"
+            args.reset = reset
+            init_db_cmd(args)
+            continue
+        if choice == "7":
+            profit_summary_cmd(args)
+            continue
+
+        print("无效输入，请重新选择。")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(prog="fund_predictor", description="基金预测/回测系统命令行工具")
@@ -296,6 +435,16 @@ def build_parser() -> argparse.ArgumentParser:
     p10 = sub.add_parser("history", help="查看最近交易流水")
     p10.add_argument("--limit", type=int, default=20, help="最多显示多少条流水，默认20")
     p10.set_defaults(func=history_cmd)
+
+    p11 = sub.add_parser("init-db", help="初始化本地交易数据库")
+    p11.add_argument("--reset", action="store_true", help="重置数据库（会清空历史）")
+    p11.set_defaults(func=init_db_cmd)
+
+    p12 = sub.add_parser("profit-summary", help="查询收益明细与概览")
+    p12.set_defaults(func=profit_summary_cmd)
+
+    p13 = sub.add_parser("console", help="交互控制台菜单")
+    p13.set_defaults(func=console_cmd)
     return parser
 
 
