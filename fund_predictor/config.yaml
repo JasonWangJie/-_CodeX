@@ -18,6 +18,8 @@ data_source:
   retry_sleep_seconds: 1.5
   # 是否启用增量更新：true=只拉取本地最新日期之后的数据；false=每次全量
   use_incremental_update: true
+  # 网络异常时是否优先回退到本地缓存数据继续分析
+  local_cache_first_on_fetch_error: true
 
 storage:
   # 基金净值缓存目录（每个基金一个 parquet/csv 文件）
@@ -28,6 +30,14 @@ storage:
   output_dir: "output/reports"
   # 净值存储格式：parquet 或 csv
   file_format: "parquet"
+  # 缓存后端：file（parquet/csv）或 sqlite（推荐批量分析）
+  backend: "file"
+  # SQLite 缓存路径（backend=sqlite 时生效）
+  sqlite_path: "data/meta/nav_cache.db"
+  # 是否启用进程内内存缓存（提升同轮次重复读取速度）
+  use_memory_cache: true
+  # 内存缓存最大基金数量（LRU淘汰）
+  memory_cache_size: 128
 
 feature:
   # R1短跌窗口列表（单位：交易日）；会分别计算 R1_3 / R1_5 / R1_15

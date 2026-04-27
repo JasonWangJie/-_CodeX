@@ -344,7 +344,15 @@ def _build_latest_price_map(cfg: dict, positions: list[dict]) -> dict[str, float
         code = pos.get("fund_code")
         if not code:
             continue
-        df = load_nav(nav_dir, str(code), fmt)
+        df = load_nav(
+            nav_dir,
+            str(code),
+            fmt,
+            backend=cfg["storage"].get("backend", "file"),
+            sqlite_path=cfg["storage"].get("sqlite_path", "data/meta/nav_cache.db"),
+            use_memory_cache=cfg["storage"].get("use_memory_cache", True),
+            memory_cache_size=cfg["storage"].get("memory_cache_size", 128),
+        )
         if df.empty:
             continue
         row = df.sort_values("nav_date").iloc[-1]

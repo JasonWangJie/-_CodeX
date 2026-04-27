@@ -36,6 +36,16 @@ runtime:
 
 当你未通过 `--funds` 或 `--fund-file` 传参时，系统会自动使用该 JSON 基金池。
 
+## 缓存模式（新增）
+默认使用文件缓存（parquet/csv）。如需提升多基金批量分析复用效率，可切换为 SQLite 缓存：
+
+```yaml
+storage:
+  backend: "sqlite"
+  sqlite_path: "data/meta/nav_cache.db"
+  use_memory_cache: true
+```
+
 ## 快速开始
 ```bash
 python main.py analyze

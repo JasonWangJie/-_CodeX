@@ -70,7 +70,15 @@ def fetch_and_update_fund(fund_code: str, cfg: dict[str, Any], logger) -> tuple[
 
     ds = cfg["data_source"]
     st = cfg["storage"]
-    existing = load_nav(st["nav_dir"], fund_code, st["file_format"])
+    existing = load_nav(
+        st["nav_dir"],
+        fund_code,
+        st["file_format"],
+        backend=st.get("backend", "file"),
+        sqlite_path=st.get("sqlite_path", "data/meta/nav_cache.db"),
+        use_memory_cache=st.get("use_memory_cache", True),
+        memory_cache_size=st.get("memory_cache_size", 128),
+    )
     start_date = None
     if not existing.empty and ds.get("use_incremental_update", True):
         start_date = (pd.to_datetime(existing["nav_date"]).max() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -122,17 +130,30 @@ def fetch_and_update_fund(fund_code: str, cfg: dict[str, Any], logger) -> tuple[
                 merged["fund_name"] = fund_name
             else:
                 merged["fund_name"] = merged["fund_name"].fillna("").replace("", fund_name)
-        save_nav(merged, st["nav_dir"], fund_code, st["file_format"])
+        save_nav(
+            merged,
+            st["nav_dir"],
+            fund_code,
+            st["file_format"],
+            backend=st.get("backend", "file"),
+            sqlite_path=st.get("sqlite_path", "data/meta/nav_cache.db"),
+            use_memory_cache=st.get("use_memory_cache", True),
+            memory_cache_size=st.get("memory_cache_size", 128),
+        )
         status = FundFetchStatus(fund_code=fund_code, fund_name=fund_name, status="success", used_in_analysis=True)
         return merged, status
     except (FetchError, ParseError) as exc:
         logger.exception("基金 %s 数据获取失败", fund_code)
+        use_local = bool(ds.get("local_cache_first_on_fetch_error", True))
         status = FundFetchStatus(
             fund_code=fund_code,
             fund_name=fund_name,
             status="fetch_failed" if isinstance(exc, FetchError) else "parse_failed",
             reason=str(exc),
             retry_count=ds["retry_times"],
-            used_in_analysis=False,
+            used_in_analysis=use_local and not existing.empty,
         )
-        return existing, status
+        # 网络异常时可切换为“本地缓存优先模式”，提升任务连续性。
+        if use_local:
+            return existing, status
+        return pd.DataFrame(), status
