@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>基金报告</title></head>
+<body>
+<h1>基金预测/回测报告</h1>
+<p>运行时间：{{ summary.run_time }}</p>
+<h2>结果排名</h2>
+<ul>
+{% for item in ranking %}
+<li>{{ item.fund_code }} | score={{ '%.4f'|format(item.score) }} | M={{ item.m }} N={{ item.n }}</li>
+{% endfor %}
+</ul>
+<h2>风险提示</h2>
+<p>本报告仅用于量化研究与技术验证，不构成任何投资建议。基金投资有风险，决策需谨慎。</p>
+</body></html>

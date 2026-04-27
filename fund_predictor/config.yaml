@@ -1,0 +1,50 @@
+data_source:
+  base_url: "https://fund.eastmoney.com/f10/F10DataApi.aspx"
+  per_page: 200
+  timeout_seconds: 10
+  retry_times: 2
+  retry_sleep_seconds: 1.5
+  use_incremental_update: true
+
+storage:
+  nav_dir: "data/nav"
+  meta_dir: "data/meta"
+  output_dir: "output/reports"
+  file_format: "parquet"
+
+feature:
+  r1_windows: [3, 5, 15]
+  r2_window: 220
+  hv_window: 90
+  quantile_window: null
+  quantile_level: 0.8
+  min_r1_floor: 0.03
+  min_r2_floor: 0.08
+  accel_min: 0.5
+
+strategy:
+  buy_delay_range: [0, 35]
+  hold_days_min: 7
+  hold_days_max: 540
+  hold_days_step: 3
+  win_target: 0.12
+  take_profit_hv_multiplier: 3.5
+  take_profit_confirm_days: 10
+  min_trades: 8
+
+threshold_scan:
+  r1_candidates: [0.03, 0.05, 0.08]
+  r2_quantile_candidates: [0.6, 0.7, 0.8, 0.9]
+
+scoring:
+  penalty_m_ge_15: 0.001
+  penalty_n_le_7: 0.015
+  recent_validation_weight: 0.25
+  min_confidence: 0.0
+  max_confidence: 1.0
+
+runtime:
+  max_funds_per_run: 50
+  max_grid_combinations_per_fund: 2500
+  enable_multiprocessing: false
+  log_level: "INFO"
