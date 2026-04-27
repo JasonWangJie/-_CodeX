@@ -48,3 +48,4 @@ runtime:
   max_grid_combinations_per_fund: 2500
   enable_multiprocessing: false
   log_level: "INFO"
+  funds_json: "data/meta/funds.json"

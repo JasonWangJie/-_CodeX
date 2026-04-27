@@ -30,11 +30,34 @@ from fund_predictor.utils.time_utils import now_str
 
 
 def _load_funds(args) -> list[str]:
-    """汇总命令行与文件中的基金代码列表。"""
+    """
+    汇总基金代码来源（优先级从高到低）：
+    1) --funds 命令行输入
+    2) --fund-file 文本文件
+    3) config.yaml 指定的 JSON 文件（runtime.funds_json）
+    """
     funds = list(args.funds or [])
     if args.fund_file:
         txt = Path(args.fund_file).read_text(encoding="utf-8")
         funds.extend([x.strip() for x in txt.splitlines() if x.strip()])
+
+    # 命令行没有传基金时，自动回落到配置 JSON。
+    if not funds:
+        cfg = load_config(args.config)
+        funds_json = cfg.get("runtime", {}).get("funds_json", "")
+        if funds_json:
+            path = Path(funds_json)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                # 支持两种格式：
+                # 1) ["009689", "005827"]
+                # 2) [{"fund_code":"009689","fund_name":"xxx"}, ...]
+                if isinstance(payload, list):
+                    for item in payload:
+                        if isinstance(item, str):
+                            funds.append(item.strip())
+                        elif isinstance(item, dict) and item.get("fund_code"):
+                            funds.append(str(item["fund_code"]).strip())
     return funds
 
 
@@ -315,6 +338,7 @@ def console_cmd(args):
             return 0
         if choice == "1":
             funds_text = input("请输入基金代码（空格分隔）：").strip()
+            # 交互输入为空时，会自动回落到配置 JSON 基金池。
             args.funds = [x for x in funds_text.split() if x]
             analyze(args)
             continue
